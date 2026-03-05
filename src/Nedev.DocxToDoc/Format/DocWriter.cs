@@ -1,5 +1,8 @@
 using System;
 using System.IO;
+using System.Text;
+using System.Collections.Generic;
+using Nedev.DocxToDoc.Model;
 
 namespace Nedev.DocxToDoc.Format
 {
@@ -7,50 +10,403 @@ namespace Nedev.DocxToDoc.Format
     /// Writes the various streams required by the MS-DOC File Format (.doc)
     /// such as the WordDocument stream, 1Table, Data, etc.
     /// </summary>
-    internal class DocWriter
+    public class DocWriter
     {
-        public void WriteDocBlocks(DocxReader reader, Stream outputStream)
+        public void WriteDocBlocks(DocumentModel model, Stream outputStream)
         {
             // 1. Initialize streams needed for the MS-DOC file
             using var wordDocumentStream = new MemoryStream();
             using var tableStream = new MemoryStream();
             using var dataStream = new MemoryStream();
 
-            // 2. Write File Information Block (FIB) - placeholder
-            WriteFib(wordDocumentStream);
-
-            // 3. Process reader contents 
-            // e.g., stream text and paragraph properties to tableStream & wordDocumentStream
+            // 1. Build the text buffer and formatting structures in one pass
+            var textBuilder = new StringBuilder();
+            var chpxWriter = new ChpxFkpWriter();
+            var papxWriter = new PapxFkpWriter();
+            var tapxWriter = new TapxFkpWriter();
             
-            // 4. Wrap the streams into OLE Compound File Binary (CFB) format
+            int currentCp = 0;
+            var tableWriter = new BinaryWriter(tableStream);
+
+            void ProcessParagraph(ParagraphModel para)
+            {
+                int paraStart = currentCp;
+                foreach (var run in para.Runs)
+                {
+                    if (run.Text.Length == 0) continue;
+                    
+                    // Build Runs
+                    List<byte> runSprms = new List<byte>();
+                    if (run.Properties.IsBold) { runSprms.Add(0x35); runSprms.Add(0x08); runSprms.Add(1); }
+                    if (run.Properties.IsItalic) { runSprms.Add(0x36); runSprms.Add(0x08); runSprms.Add(1); }
+                    if (run.Properties.IsStrike) { runSprms.Add(0x37); runSprms.Add(0x08); runSprms.Add(1); }
+                    if (run.Properties.FontSize.HasValue) 
+                    { 
+                        runSprms.Add(0x43); runSprms.Add(0x4A); 
+                        runSprms.Add(BitConverter.GetBytes((short)run.Properties.FontSize.Value)[0]); 
+                        runSprms.Add(BitConverter.GetBytes((short)run.Properties.FontSize.Value)[1]); 
+                    }
+
+                    if (runSprms.Count > 0)
+                        chpxWriter.AddRun(currentCp, currentCp + run.Text.Length, runSprms.ToArray());
+                    
+                    textBuilder.Append(run.Text);
+                    currentCp += run.Text.Length;
+                }
+                
+                // End Paragraph
+                List<byte> paraSprms = new List<byte>();
+                if (para.Properties.Alignment != ParagraphModel.Justification.Left)
+                {
+                    paraSprms.Add(0x03); paraSprms.Add(0x24); paraSprms.Add((byte)para.Properties.Alignment);
+                }
+                if (para.Properties.NumberingId.HasValue)
+                {
+                    paraSprms.Add(0x0B); paraSprms.Add(0x46);
+                    int lfoIndex = model.NumberingInstances.FindIndex(n => n.Id == para.Properties.NumberingId.Value) + 1;
+                    paraSprms.Add((byte)(lfoIndex & 0xFF)); paraSprms.Add((byte)((lfoIndex >> 8) & 0xFF));
+                    if (para.Properties.NumberingLevel.HasValue)
+                    {
+                        paraSprms.Add(0x11); paraSprms.Add(0x26); paraSprms.Add((byte)para.Properties.NumberingLevel.Value);
+                    }
+                }
+
+                textBuilder.Append('\r');
+                papxWriter.AddParagraph(paraStart, currentCp + 1, paraSprms.ToArray());
+                currentCp += 1;
+            }
+
+            foreach (var item in model.Content)
+            {
+                if (item is ParagraphModel para)
+                {
+                    ProcessParagraph(para);
+                }
+                else if (item is TableModel table)
+                {
+                    foreach (var row in table.Rows)
+                    {
+                        int rowStart = currentCp;
+                        foreach (var cell in row.Cells)
+                        {
+                            foreach (var cellPara in cell.Paragraphs)
+                            {
+                                ProcessParagraph(cellPara);
+                            }
+                            // Cell Mark - treated as a paragraph terminator in MS-DOC
+                            int cellMarkStart = currentCp;
+                            textBuilder.Append('\x0007');
+                            currentCp += 1;
+                            
+                            // Cell marks need PAPX entries with sprmPFInTable
+                            List<byte> cellMarkSprms = new List<byte>();
+                            cellMarkSprms.Add(0x16); cellMarkSprms.Add(0x24); cellMarkSprms.Add(1); // sprmPFInTable = 1
+                            papxWriter.AddParagraph(cellMarkStart, currentCp, cellMarkSprms.ToArray());
+                        }
+                        // Row Mark Paragraph
+                        int rowMarkStart = currentCp;
+                        textBuilder.Append('\r');
+                        
+                        List<byte> rowParaSprms = new List<byte>();
+                        rowParaSprms.Add(0x16); rowParaSprms.Add(0x24); rowParaSprms.Add(1); // sprmPFTable = 1
+                        rowParaSprms.Add(0x17); rowParaSprms.Add(0x24); rowParaSprms.Add(1); // sprmPFTermInTbl = 1
+                        
+                        papxWriter.AddParagraph(rowMarkStart, currentCp + 1, rowParaSprms.ToArray());
+                        currentCp += 1;
+                        
+                        // Build TAP (Table Properties) for this row
+                        List<byte> tapSprms = new List<byte>();
+                        // sprmTDefTable (0xD608) - minimal definition
+                        tapSprms.Add(0x08); tapSprms.Add(0xD6);
+                        // Complex operand shortened for now
+                        byte[] defTable = new byte[10] { 0x08, (byte)row.Cells.Count, 0, 0, 0, 0, 0, 0, 0, 0 };
+                        tapSprms.AddRange(defTable);
+                        
+                        tapxWriter.AddRow(rowStart, currentCp, tapSprms.ToArray());
+                    }
+                }
+            }
+
+            string finalBaseText = textBuilder.ToString();
+            byte[] textBytes = System.Text.Encoding.GetEncoding(1252).GetBytes(finalBaseText);
+            wordDocumentStream.Seek(1536, SeekOrigin.Begin);
+            wordDocumentStream.Write(textBytes);
+
+            // 2. Build the Piece Table (Clx)
+            int fcClx = (int)tableStream.Position;
+            tableWriter.Write((byte)0x02);
+            int cbPlcfpcd = (2 * 4) + (1 * 8); 
+            tableWriter.Write((int)cbPlcfpcd);
+            tableWriter.Write((int)0);
+            tableWriter.Write((int)currentCp);
+            int fcBits = (1536) | 0x40000000;
+            tableWriter.Write((int)fcBits);
+            tableWriter.Write((short)0);
+            int lcbClx = (int)tableStream.Position - fcClx;
+
+            // 3. Process CHPX FKPs 
+            int fcPlcfbteChpx = 0; int lcbPlcfbteChpx = 0;
+            byte[] chpxPage = chpxWriter.GeneratePage();
+            if (chpxPage.Length > 0 && chpxPage[511] > 0)
+            {
+                long rem = wordDocumentStream.Position % 512;
+                if (rem != 0) wordDocumentStream.Write(new byte[512 - rem]);
+                int pnChpx = (int)(wordDocumentStream.Position / 512);
+                wordDocumentStream.Write(chpxPage);
+                fcPlcfbteChpx = (int)tableStream.Position;
+                tableWriter.Write((int)0); tableWriter.Write((int)currentCp); tableWriter.Write((int)pnChpx);
+                lcbPlcfbteChpx = (int)tableStream.Position - fcPlcfbteChpx;
+            }
+
+            // 4. Process PAPX FKPs
+            int fcPlcfbtePapx = 0; int lcbPlcfbtePapx = 0;
+            byte[] papxPage = papxWriter.GeneratePage();
+            if (papxPage.Length > 0 && papxPage[511] > 0)
+            {
+                long rem = wordDocumentStream.Position % 512;
+                if (rem != 0) wordDocumentStream.Write(new byte[512 - rem]);
+                int pnPapx = (int)(wordDocumentStream.Position / 512);
+                wordDocumentStream.Write(papxPage);
+                fcPlcfbtePapx = (int)tableStream.Position;
+                tableWriter.Write((int)0); tableWriter.Write((int)currentCp); tableWriter.Write((int)pnPapx);
+                lcbPlcfbtePapx = (int)tableStream.Position - fcPlcfbtePapx;
+            }
+
+            // 5. Process TAPX FKPs
+            int fcPlcfbteTapx = 0; int lcbPlcfbteTapx = 0;
+            byte[] tapxPage = tapxWriter.GeneratePage();
+            if (tapxPage.Length > 0 && tapxPage[511] > 0)
+            {
+                long rem = wordDocumentStream.Position % 512;
+                if (rem != 0) wordDocumentStream.Write(new byte[512 - rem]);
+                int pnTapx = (int)(wordDocumentStream.Position / 512);
+                wordDocumentStream.Write(tapxPage);
+                fcPlcfbteTapx = (int)tableStream.Position;
+                tableWriter.Write((int)0); tableWriter.Write((int)currentCp); tableWriter.Write((int)pnTapx);
+                lcbPlcfbteTapx = (int)tableStream.Position - fcPlcfbteTapx;
+            }
+
+            // 6. Build Font Table (STTB FFN)
+            int fcSttbfffn = (int)tableStream.Position;
+            WriteFontTable(tableWriter, model.Fonts);
+            int lcbSttbfffn = (int)tableStream.Position - fcSttbfffn;
+
+            // 7. Build Style Sheet (STSH)
+            int fcStshf = (int)tableStream.Position;
+            WriteStyleSheet(tableWriter, model.Styles);
+            int lcbStshf = (int)tableStream.Position - fcStshf;
+
+            // 8. Write Numbering (SttbLst and PlcfLfo)
+            int fcSttbLst = (int)tableStream.Position;
+            WriteNumbering(tableWriter, model);
+            int lcbSttbLst = (int)tableStream.Position - fcSttbLst;
+
+            int fcPlfLfo = (int)tableStream.Position;
+            WriteLfo(tableWriter, model);
+            int lcbPlfLfo = (int)tableStream.Position - fcPlfLfo;
+
+            // 9. Process section properties: Build Plcfsed and SED/SEP
+            var sections = model.Sections.Count > 0 ? model.Sections : new List<SectionModel> { new SectionModel() };
+            
+            // Write SEPs to WordDocument
+            List<int> fcSeps = new List<int>();
+            wordDocumentStream.Seek(0, SeekOrigin.End);
+            foreach (var section in sections)
+            {
+                fcSeps.Add((int)wordDocumentStream.Position);
+                using var sepBinaryWriter = new BinaryWriter(wordDocumentStream, System.Text.Encoding.GetEncoding(1252), leaveOpen: true);
+                
+                List<byte> sepSprms = new List<byte>();
+                void AddShortSprm(ushort op, int val)
+                {
+                    sepSprms.Add((byte)(op & 0xFF));
+                    sepSprms.Add((byte)((op >> 8) & 0xFF));
+                    sepSprms.Add(BitConverter.GetBytes((short)val)[0]);
+                    sepSprms.Add(BitConverter.GetBytes((short)val)[1]);
+                }
+
+                AddShortSprm(0xB603, section.PageWidth);
+                AddShortSprm(0xB604, section.PageHeight);
+                AddShortSprm(0xB605, section.MarginLeft);
+                AddShortSprm(0xB606, section.MarginRight);
+                AddShortSprm(0xB607, section.MarginTop);
+                AddShortSprm(0xB608, section.MarginBottom);
+
+                sepBinaryWriter.Write((short)sepSprms.Count);
+                sepBinaryWriter.Write(sepSprms.ToArray());
+            }
+
+            // Build Plcfsed in 1Table
+            int fcPlcfsed = (int)tableStream.Position;
+            tableWriter.Write((int)0);
+            tableWriter.Write((int)currentCp);
+            foreach (var fcSep in fcSeps)
+            {
+                tableWriter.Write((short)0); // fn = 0 (WordDocument)
+                tableWriter.Write((int)fcSep); // fcSep
+                tableWriter.Write((short)0); // reserved
+                tableWriter.Write(new byte[6]); // padding to 12 bytes
+            }
+            int lcbPlcfsed = (int)tableStream.Position - fcPlcfsed;
+
+            // 10. Write File Information Block (FIB)
+            wordDocumentStream.Seek(0, SeekOrigin.Begin);
+            var fib = new Fib
+            {
+                fcClx = fcClx,
+                lcbClx = lcbClx,
+                fcPlcfbteChpx = fcPlcfbteChpx,
+                lcbPlcfbteChpx = lcbPlcfbteChpx,
+                fcPlcfbtePapx = fcPlcfbtePapx,
+                lcbPlcfbtePapx = lcbPlcfbtePapx,
+                fcPlcfsed = fcPlcfsed,
+                lcbPlcfsed = lcbPlcfsed,
+                fcPlcfbteTapx = fcPlcfbteTapx,
+                lcbPlcfbteTapx = lcbPlcfbteTapx,
+                fcStshf = fcStshf,
+                lcbStshf = lcbStshf,
+                fcSttbfffn = fcSttbfffn,
+                lcbSttbfffn = lcbSttbfffn,
+                fcSttbLst = fcSttbLst,
+                lcbSttbLst = lcbSttbLst,
+                fcPlfLfo = fcPlfLfo,
+                lcbPlfLfo = lcbPlfLfo,
+                ccpText = currentCp
+            };
+            fib.WriteTo(new BinaryWriter(wordDocumentStream, System.Text.Encoding.GetEncoding(1252), leaveOpen: true));
+
+            // 8. Wrap the streams into OLE Compound File Binary (CFB) format
             using var cfbWriter = new CfbWriter();
             cfbWriter.AddStream("WordDocument", wordDocumentStream.ToArray());
             cfbWriter.AddStream("1Table", tableStream.ToArray());
             cfbWriter.AddStream("Data", dataStream.ToArray());
             
-            // Optional/Standard metadata streams
-            // cfbWriter.AddStream("\x05SummaryInformation", SummaryInfoData);
-            // cfbWriter.AddStream("\x05DocumentSummaryInformation", DocSummaryInfoData);
-
-            // 5. Write out the final CFB to the destination
+            // 9. Write out the final CFB to the destination
             cfbWriter.WriteTo(outputStream);
         }
 
-        private void WriteFib(Stream stream)
+        private void WriteNumbering(BinaryWriter writer, DocumentModel model)
         {
-            // The File Information Block starts at offset 0 in the WordDocument stream.
-            // Minimum size of base FIB is 32 bytes (FIB base), then more for FibRgW97, FibRgLw97, etc.
-            // Here we just write a skeleton representing a valid base to be expanded later.
-            using var writer = new BinaryWriter(stream, System.Text.Encoding.GetEncoding(1252), leaveOpen: true);
+            // STTB (String Table) header for LST
+            writer.Write((ushort)0xFFFF); // fExtend
+            writer.Write((ushort)model.AbstractNumbering.Count);
+            writer.Write((ushort)0); // cbExtra
+
+            foreach (var abs in model.AbstractNumbering)
+            {
+                // LSTF (28 bytes)
+                writer.Write(abs.Id); // lsid
+                writer.Write(0); // tplc
+                for (int i = 0; i < 9; i++) writer.Write((short)0); // rgwchHtml
+                writer.Write((byte)1); // grf (fSimpleList = 1?)
+                writer.Write((byte)0); // unused
+
+                // LVLs (9 levels usually required)
+                for (int i = 0; i < 9; i++)
+                {
+                    var levelModel = abs.Levels.Find(l => l.Level == i) ?? new NumberingLevelModel { Level = i };
+                    
+                    // LVL structure
+                    writer.Write(levelModel.Start); // iStartAt
+                    
+                    byte nfc = levelModel.NumberFormat switch
+                    {
+                        "decimal" => 0,
+                        "upperRoman" => 1,
+                        "lowerRoman" => 2,
+                        "upperLetter" => 3,
+                        "lowerLetter" => 4,
+                        _ => 0
+                    };
+                    writer.Write(nfc);
+                    writer.Write((byte)0); // jc (left)
+                    writer.Write(new byte[9]); // rgbxchNums
+                    writer.Write((byte)0); // ixchFollow (0=tab)
+                    writer.Write((int)0); // dxvIndent
+                    writer.Write((int)0); // dxvSpace
+                    writer.Write((byte)0); // cbGrpprlChpx
+                    writer.Write((byte)0); // cbGrpprlPapx
+                    writer.Write((ushort)0); // reserved
+                    
+                    // xst (short string for level text)
+                    string text = levelModel.LevelText.Replace("%" + (i + 1), "\x0001");
+                    writer.Write((ushort)text.Length);
+                    foreach (char c in text) writer.Write((short)c);
+                }
+            }
+        }
+
+        private void WriteLfo(BinaryWriter writer, DocumentModel model)
+        {
+            // PlfLfo structure
+            writer.Write(model.NumberingInstances.Count); // lLfo
+
+            foreach (var instance in model.NumberingInstances)
+            {
+                // LFO (16 bytes)
+                writer.Write(instance.AbstractNumberId); // lsid
+                writer.Write(0); // reserved1
+                writer.Write(0); // reserved2
+                writer.Write((byte)0); // clfolvl
+                writer.Write((byte)0); // ibstFltcl
+                writer.Write((ushort)0); // grf
+            }
+
+            // No LFOData levels for now (simplified)
+        }
+
+        private void WriteFontTable(BinaryWriter writer, List<FontModel> fonts)
+        {
+            // STTB (String Table) header for FFN
+            writer.Write((ushort)0xFFFF); // fExtend
+            writer.Write((ushort)fonts.Count); 
+            writer.Write((ushort)0); // cbExtra (0 for FFN)
+
+            foreach (var font in fonts)
+            {
+                // FFN (Font Family Name) structure
+                // cbFfn (1 byte): Total size of FFN excluding this byte
+                byte[] nameBytes = System.Text.Encoding.Unicode.GetBytes(font.Name + "\0");
+                byte cbFfn = (byte)(1 + 1 + 2 + 1 + 1 + nameBytes.Length); // Simplified
+                
+                writer.Write(cbFfn);
+                writer.Write((byte)0); // prq/fTrueType
+                writer.Write((byte)0); // ff/w
+                writer.Write((short)0); // wWeight
+                writer.Write((byte)0); // chs (Charset)
+                writer.Write((byte)0); // ixchSz
+                writer.Write(nameBytes);
+            }
+        }
+
+        private void WriteStyleSheet(BinaryWriter writer, List<Nedev.DocxToDoc.Model.StyleModel> styles)
+        {
+            // STSH structure (Style Sheet)
+            // STSHI header (Style Sheet Information)
+            writer.Write((ushort)0); // cbStshi (placeholder)
+            long startPos = writer.BaseStream.Position;
+
+            // cstd (count of styles)
+            ushort cstd = (ushort)Math.Max(styles.Count, 15); // Word usually expects at least 15 standard slots
+            writer.Write(cstd);
+            writer.Write((ushort)0x000A); // cbStd (size of STD base)
             
-            // magic number
-            writer.Write((ushort)0xA5EC); // wIdent
-            writer.Write((ushort)0x00C1); // nFib (Word 97 = 193)
-            writer.Write((ushort)0x0000); // unused / nProduct
-            writer.Write((ushort)0x0000); // lid
-            writer.Write((short)0); // pnNext
-            
-            // And so forth... to be fully implemented based on MS-DOC specifications.
+            writer.Write((ushort)0); // fSls
+            writer.Write((ushort)0); // ftcStandard
+            // ... more STSHI fields
+            writer.Write(new byte[10]); // Padding for minimal STSHI
+
+            long endPos = writer.BaseStream.Position;
+            writer.BaseStream.Seek(startPos - 2, SeekOrigin.Begin);
+            writer.Write((ushort)(endPos - startPos)); // Actual cbStshi
+            writer.BaseStream.Seek(endPos, SeekOrigin.Begin);
+
+            // Write STDs (Style Descriptions)
+            for (int i = 0; i < cstd; i++)
+            {
+                // For now, write empty or placeholder STDs
+                writer.Write((ushort)0); // cb (0 = empty slot)
+            }
         }
     }
 }

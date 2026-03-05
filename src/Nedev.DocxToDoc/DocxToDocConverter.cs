@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Text;
 
 namespace Nedev.DocxToDoc
 {
@@ -9,6 +10,11 @@ namespace Nedev.DocxToDoc
     /// </summary>
     public class DocxToDocConverter
     {
+        static DocxToDocConverter()
+        {
+            Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        }
+
         /// <summary>
         /// Converts a .docx file to a .doc file.
         /// </summary>
@@ -41,11 +47,11 @@ namespace Nedev.DocxToDoc
             using var reader = new Format.DocxReader(docxStream);
             
             // Extract necessary layout/styles/content out of OpenXML and map to MS-DOC
-            // (Architecture skeleton: Read document model -> generate WordDocument binary fragments)
+            var documentModel = reader.ReadDocument();
             
             // Provide data blocks for the MS-DOC writer
             var writer = new Format.DocWriter();
-            writer.WriteDocBlocks(reader, docStream);
+            writer.WriteDocBlocks(documentModel, docStream);
         }
     }
 }
