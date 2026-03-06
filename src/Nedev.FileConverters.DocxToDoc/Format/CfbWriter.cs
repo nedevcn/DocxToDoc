@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using OpenMcdf;
 
-namespace Nedev.DocxToDoc.Format
+namespace Nedev.FileConverters.DocxToDoc.Format
 {
     /// <summary>
     /// Writes Compound File Binary (OLE2) format streams into a single structure.

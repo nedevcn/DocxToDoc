@@ -1,10 +1,13 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <RootNamespace>Nedev.FileConverters.DocxToDoc.Tests</RootNamespace>
+    <AssemblyName>Nedev.FileConverters.DocxToDoc.Tests</AssemblyName>
+    <Version>0.1.0</Version>
   </PropertyGroup>
 
   <ItemGroup>
@@ -20,7 +23,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\src\Nedev.DocxToDoc\Nedev.DocxToDoc.csproj" />
+    <ProjectReference Include="..\Nedev.FileConverters.DocxToDoc\Nedev.FileConverters.DocxToDoc.csproj" />
   </ItemGroup>
 
 </Project>

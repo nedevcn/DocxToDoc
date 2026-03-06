@@ -1,7 +1,7 @@
 using System.IO;
 using Xunit;
 
-namespace Nedev.DocxToDoc.Tests.Format
+namespace Nedev.FileConverters.DocxToDoc.Tests.Format
 {
     public class FibTests
     {
@@ -9,7 +9,7 @@ namespace Nedev.DocxToDoc.Tests.Format
         public void Fib_WriteTo_ProducesCorrectBaseStructure()
         {
             // Arrange
-            var fib = new Nedev.DocxToDoc.Format.Fib();
+            var fib = new Nedev.FileConverters.DocxToDoc.Format.Fib();
             using var ms = new MemoryStream();
             using var writer = new BinaryWriter(ms);
 

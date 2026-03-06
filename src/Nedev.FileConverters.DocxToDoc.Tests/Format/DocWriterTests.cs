@@ -1,10 +1,10 @@
 using System.IO;
 using System.Text;
-using Nedev.DocxToDoc.Format;
-using Nedev.DocxToDoc.Model;
+using Nedev.FileConverters.DocxToDoc.Format;
+using Nedev.FileConverters.DocxToDoc.Model;
 using Xunit;
 
-namespace Nedev.DocxToDoc.Tests.Format
+namespace Nedev.FileConverters.DocxToDoc.Tests.Format
 {
     public class DocWriterTests
     {

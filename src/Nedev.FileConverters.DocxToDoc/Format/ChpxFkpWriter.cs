@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 
-namespace Nedev.DocxToDoc.Format
+namespace Nedev.FileConverters.DocxToDoc.Format
 {
     /// <summary>
     /// Helps pack Single Property Modifiers (Sprm) into a Formatted Disk Page (FKP) 

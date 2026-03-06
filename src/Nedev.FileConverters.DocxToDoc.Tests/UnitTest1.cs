@@ -1,4 +1,4 @@
-﻿namespace Nedev.DocxToDoc.Tests;
+namespace Nedev.FileConverters.DocxToDoc.Tests;
 
 public class UnitTest1
 {

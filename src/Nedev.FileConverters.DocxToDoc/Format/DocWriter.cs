@@ -2,9 +2,9 @@ using System;
 using System.IO;
 using System.Text;
 using System.Collections.Generic;
-using Nedev.DocxToDoc.Model;
+using Nedev.FileConverters.DocxToDoc.Model;
 
-namespace Nedev.DocxToDoc.Format
+namespace Nedev.FileConverters.DocxToDoc.Format
 {
     /// <summary>
     /// Writes the various streams required by the MS-DOC File Format (.doc)
@@ -379,7 +379,7 @@ namespace Nedev.DocxToDoc.Format
             }
         }
 
-        private void WriteStyleSheet(BinaryWriter writer, List<Nedev.DocxToDoc.Model.StyleModel> styles)
+        private void WriteStyleSheet(BinaryWriter writer, List<Nedev.FileConverters.DocxToDoc.Model.StyleModel> styles)
         {
             // STSH structure (Style Sheet)
             // STSHI header (Style Sheet Information)

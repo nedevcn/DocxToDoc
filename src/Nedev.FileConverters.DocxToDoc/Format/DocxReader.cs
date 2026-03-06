@@ -5,7 +5,7 @@ using System.Xml;
 using System.Text;
 using System.Collections.Generic;
 
-namespace Nedev.DocxToDoc.Format
+namespace Nedev.FileConverters.DocxToDoc.Format
 {
     /// <summary>
     /// Reads and coordinates the extraction of features from OpenXML (.docx) files.
@@ -22,7 +22,7 @@ namespace Nedev.DocxToDoc.Format
             _archive = new ZipArchive(docxStream, ZipArchiveMode.Read, leaveOpen: true);
         }
 
-        public Nedev.DocxToDoc.Model.DocumentModel ReadDocument()
+        public Nedev.FileConverters.DocxToDoc.Model.DocumentModel ReadDocument()
         {
             var documentEntry = _archive.GetEntry("word/document.xml");
             if (documentEntry == null)
@@ -37,7 +37,7 @@ namespace Nedev.DocxToDoc.Format
                 IgnoreWhitespace = true 
             });
 
-            var docModel = new Nedev.DocxToDoc.Model.DocumentModel();
+            var docModel = new Nedev.FileConverters.DocxToDoc.Model.DocumentModel();
             
             // Parse Styles
             var stylesEntry = _archive.GetEntry("word/styles.xml");
@@ -65,12 +65,12 @@ namespace Nedev.DocxToDoc.Format
 
             StringBuilder textBuffer = new StringBuilder();
 
-            Nedev.DocxToDoc.Model.ParagraphModel currentParagraph = null;
-            Nedev.DocxToDoc.Model.RunModel currentRun = null;
-            Nedev.DocxToDoc.Model.SectionModel currentSection = null;
-            Nedev.DocxToDoc.Model.TableModel currentTable = null;
-            Nedev.DocxToDoc.Model.TableRowModel currentRow = null;
-            Nedev.DocxToDoc.Model.TableCellModel currentCell = null;
+            Nedev.FileConverters.DocxToDoc.Model.ParagraphModel currentParagraph = null;
+            Nedev.FileConverters.DocxToDoc.Model.RunModel currentRun = null;
+            Nedev.FileConverters.DocxToDoc.Model.SectionModel currentSection = null;
+            Nedev.FileConverters.DocxToDoc.Model.TableModel currentTable = null;
+            Nedev.FileConverters.DocxToDoc.Model.TableRowModel currentRow = null;
+            Nedev.FileConverters.DocxToDoc.Model.TableCellModel currentCell = null;
 
             while (xmlReader.Read())
             {
@@ -79,22 +79,22 @@ namespace Nedev.DocxToDoc.Format
                     string localName = xmlReader.LocalName;
                     if (localName == "tbl")
                     {
-                        currentTable = new Nedev.DocxToDoc.Model.TableModel();
+                        currentTable = new Nedev.FileConverters.DocxToDoc.Model.TableModel();
                         docModel.Content.Add(currentTable);
                     }
                     else if (localName == "tr" && currentTable != null)
                     {
-                        currentRow = new Nedev.DocxToDoc.Model.TableRowModel();
+                        currentRow = new Nedev.FileConverters.DocxToDoc.Model.TableRowModel();
                         currentTable.Rows.Add(currentRow);
                     }
                     else if (localName == "tc" && currentRow != null)
                     {
-                        currentCell = new Nedev.DocxToDoc.Model.TableCellModel();
+                        currentCell = new Nedev.FileConverters.DocxToDoc.Model.TableCellModel();
                         currentRow.Cells.Add(currentCell);
                     }
                     else if (localName == "p")
                     {
-                        currentParagraph = new Nedev.DocxToDoc.Model.ParagraphModel();
+                        currentParagraph = new Nedev.FileConverters.DocxToDoc.Model.ParagraphModel();
                         if (currentCell != null) currentCell.Paragraphs.Add(currentParagraph);
                         else 
                         {
@@ -114,7 +114,7 @@ namespace Nedev.DocxToDoc.Format
                     }
                     else if (localName == "sectPr")
                     {
-                        currentSection = new Nedev.DocxToDoc.Model.SectionModel();
+                        currentSection = new Nedev.FileConverters.DocxToDoc.Model.SectionModel();
                         docModel.Sections.Add(currentSection);
                     }
                     else if (localName == "pgSz" && currentSection != null)
@@ -134,15 +134,15 @@ namespace Nedev.DocxToDoc.Format
                         string val = xmlReader.GetAttribute("w:val");
                         currentParagraph.Properties.Alignment = val switch
                         {
-                            "center" => Nedev.DocxToDoc.Model.ParagraphModel.Justification.Center,
-                            "right" => Nedev.DocxToDoc.Model.ParagraphModel.Justification.Right,
-                            "both" => Nedev.DocxToDoc.Model.ParagraphModel.Justification.Both,
-                            _ => Nedev.DocxToDoc.Model.ParagraphModel.Justification.Left
+                            "center" => Nedev.FileConverters.DocxToDoc.Model.ParagraphModel.Justification.Center,
+                            "right" => Nedev.FileConverters.DocxToDoc.Model.ParagraphModel.Justification.Right,
+                            "both" => Nedev.FileConverters.DocxToDoc.Model.ParagraphModel.Justification.Both,
+                            _ => Nedev.FileConverters.DocxToDoc.Model.ParagraphModel.Justification.Left
                         };
                     }
                     else if (localName == "r" && currentParagraph != null)
                     {
-                        currentRun = new Nedev.DocxToDoc.Model.RunModel();
+                        currentRun = new Nedev.FileConverters.DocxToDoc.Model.RunModel();
                         currentParagraph.Runs.Add(currentRun);
                     }
                     else if (localName == "b" && currentRun != null)
@@ -197,12 +197,12 @@ namespace Nedev.DocxToDoc.Format
             return docModel;
         }
 
-        private void ParseNumbering(Stream numberingStream, Nedev.DocxToDoc.Model.DocumentModel docModel)
+        private void ParseNumbering(Stream numberingStream, Nedev.FileConverters.DocxToDoc.Model.DocumentModel docModel)
         {
             using var reader = XmlReader.Create(numberingStream, new XmlReaderSettings { IgnoreWhitespace = true });
-            Nedev.DocxToDoc.Model.AbstractNumberingModel currentAbstract = null;
-            Nedev.DocxToDoc.Model.NumberingLevelModel currentLevel = null;
-            Nedev.DocxToDoc.Model.NumberingInstanceModel currentInstance = null;
+            Nedev.FileConverters.DocxToDoc.Model.AbstractNumberingModel currentAbstract = null;
+            Nedev.FileConverters.DocxToDoc.Model.NumberingLevelModel currentLevel = null;
+            Nedev.FileConverters.DocxToDoc.Model.NumberingInstanceModel currentInstance = null;
 
             while (reader.Read())
             {
@@ -211,7 +211,7 @@ namespace Nedev.DocxToDoc.Format
                     string localName = reader.LocalName;
                     if (localName == "abstractNum")
                     {
-                        currentAbstract = new Nedev.DocxToDoc.Model.AbstractNumberingModel
+                        currentAbstract = new Nedev.FileConverters.DocxToDoc.Model.AbstractNumberingModel
                         {
                             Id = int.Parse(reader.GetAttribute("w:abstractNumId") ?? "0")
                         };
@@ -219,7 +219,7 @@ namespace Nedev.DocxToDoc.Format
                     }
                     else if (localName == "lvl" && currentAbstract != null)
                     {
-                        currentLevel = new Nedev.DocxToDoc.Model.NumberingLevelModel
+                        currentLevel = new Nedev.FileConverters.DocxToDoc.Model.NumberingLevelModel
                         {
                             Level = int.Parse(reader.GetAttribute("w:ilvl") ?? "0")
                         };
@@ -239,7 +239,7 @@ namespace Nedev.DocxToDoc.Format
                     }
                     else if (localName == "num")
                     {
-                        currentInstance = new Nedev.DocxToDoc.Model.NumberingInstanceModel
+                        currentInstance = new Nedev.FileConverters.DocxToDoc.Model.NumberingInstanceModel
                         {
                             Id = int.Parse(reader.GetAttribute("w:numId") ?? "0")
                         };
@@ -259,10 +259,10 @@ namespace Nedev.DocxToDoc.Format
             }
         }
 
-        private void ParseStyles(Stream stylesStream, Nedev.DocxToDoc.Model.DocumentModel docModel)
+        private void ParseStyles(Stream stylesStream, Nedev.FileConverters.DocxToDoc.Model.DocumentModel docModel)
         {
             using var reader = XmlReader.Create(stylesStream, new XmlReaderSettings { IgnoreWhitespace = true });
-            Nedev.DocxToDoc.Model.StyleModel currentStyle = null;
+            Nedev.FileConverters.DocxToDoc.Model.StyleModel currentStyle = null;
 
             while (reader.Read())
             {
@@ -270,7 +270,7 @@ namespace Nedev.DocxToDoc.Format
                 {
                     if (reader.LocalName == "style")
                     {
-                        currentStyle = new Nedev.DocxToDoc.Model.StyleModel
+                        currentStyle = new Nedev.FileConverters.DocxToDoc.Model.StyleModel
                         {
                             Id = reader.GetAttribute("w:styleId") ?? string.Empty,
                             IsParagraphStyle = reader.GetAttribute("w:type") == "paragraph"
@@ -289,7 +289,7 @@ namespace Nedev.DocxToDoc.Format
             }
         }
 
-        private void ParseFonts(Stream fontStream, Nedev.DocxToDoc.Model.DocumentModel docModel)
+        private void ParseFonts(Stream fontStream, Nedev.FileConverters.DocxToDoc.Model.DocumentModel docModel)
         {
             using var reader = XmlReader.Create(fontStream, new XmlReaderSettings { IgnoreWhitespace = true });
             while (reader.Read())
@@ -299,7 +299,7 @@ namespace Nedev.DocxToDoc.Format
                     string name = reader.GetAttribute("w:name");
                     if (!string.IsNullOrEmpty(name))
                     {
-                        docModel.Fonts.Add(new Nedev.DocxToDoc.Model.FontModel { Name = name });
+                        docModel.Fonts.Add(new Nedev.FileConverters.DocxToDoc.Model.FontModel { Name = name });
                     }
                 }
             }

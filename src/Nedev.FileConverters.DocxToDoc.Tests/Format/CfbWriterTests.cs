@@ -3,7 +3,7 @@ using System.IO;
 using OpenMcdf;
 using Xunit;
 
-namespace Nedev.DocxToDoc.Tests.Format
+namespace Nedev.FileConverters.DocxToDoc.Tests.Format
 {
     public class CfbWriterTests
     {
@@ -15,7 +15,7 @@ namespace Nedev.DocxToDoc.Tests.Format
             byte[] tableData = new byte[1024]; // Larger than minifat size (4096 is threshold, so this goes to MiniFAT)
             new Random(123).NextBytes(tableData);
 
-            using var cfbWriter = new Nedev.DocxToDoc.Format.CfbWriter();
+            using var cfbWriter = new Nedev.FileConverters.DocxToDoc.Format.CfbWriter();
             cfbWriter.AddStream("WordDocument", docData);
             cfbWriter.AddStream("1Table", tableData);
 

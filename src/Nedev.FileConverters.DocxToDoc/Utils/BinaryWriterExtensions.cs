@@ -2,7 +2,7 @@ using System;
 using System.IO;
 using System.Text;
 
-namespace Nedev.DocxToDoc.Utils
+namespace Nedev.FileConverters.DocxToDoc.Utils
 {
     /// <summary>
     /// High-performance extensions for binary operations over Streams.

@@ -5,7 +5,7 @@ using System.Linq;
 using System.Xml;
 using Xunit;
 
-namespace Nedev.DocxToDoc.Tests.Format
+namespace Nedev.FileConverters.DocxToDoc.Tests.Format
 {
     public class DocxReaderTests
     {
@@ -29,7 +29,7 @@ namespace Nedev.DocxToDoc.Tests.Format
             // Arrange
             byte[] dummyData = CreateDummyDocx();
             using var ms = new MemoryStream(dummyData);
-            using var reader = new Nedev.DocxToDoc.Format.DocxReader(ms);
+            using var reader = new Nedev.FileConverters.DocxToDoc.Format.DocxReader(ms);
 
             // Act
             var model = reader.ReadDocument();
@@ -52,7 +52,7 @@ namespace Nedev.DocxToDoc.Tests.Format
             }
             byte[] emptyZip = ms.ToArray();
             using var testStream = new MemoryStream(emptyZip);
-            using var reader = new Nedev.DocxToDoc.Format.DocxReader(testStream);
+            using var reader = new Nedev.FileConverters.DocxToDoc.Format.DocxReader(testStream);
 
             // Act & Assert
             Assert.Throws<FileNotFoundException>(() => 
@@ -78,7 +78,7 @@ namespace Nedev.DocxToDoc.Tests.Format
             }
             
             using var testStream = new MemoryStream(ms.ToArray());
-            using var reader = new Nedev.DocxToDoc.Format.DocxReader(testStream);
+            using var reader = new Nedev.FileConverters.DocxToDoc.Format.DocxReader(testStream);
 
             // Act
             var model = reader.ReadDocument();

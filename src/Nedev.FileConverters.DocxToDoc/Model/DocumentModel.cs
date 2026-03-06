@@ -1,6 +1,6 @@
 using System.Collections.Generic;
 
-namespace Nedev.DocxToDoc.Model
+namespace Nedev.FileConverters.DocxToDoc.Model
 {
     /// <summary>
     /// Represents the parsed content of a document, ready for serialization to binary MS-DOC format.

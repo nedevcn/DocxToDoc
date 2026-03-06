@@ -2,7 +2,7 @@ using System;
 using System.IO;
 using System.Text;
 
-namespace Nedev.DocxToDoc
+namespace Nedev.FileConverters.DocxToDoc
 {
     /// <summary>
     /// Provides high-performance conversion from OpenXML (.docx) into MS-DOC legacy binary (.doc) format.
@@ -12,7 +12,18 @@ namespace Nedev.DocxToDoc
     {
         static DocxToDocConverter()
         {
-            Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+            // attempt to register code pages encoding provider if available (some targets may not include the
+            // type by default, e.g. netstandard2.1). Use reflection so compilation succeeds across all TFM.
+            var providerType = Type.GetType("System.Text.CodePagesEncodingProvider, System.Text.Encoding.CodePages");
+            if (providerType != null)
+            {
+                var instanceProp = providerType.GetProperty("Instance", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+                var instance = instanceProp?.GetValue(null);
+                if (instance is EncodingProvider ep)
+                {
+                    Encoding.RegisterProvider(ep);
+                }
+            }
         }
 
         /// <summary>

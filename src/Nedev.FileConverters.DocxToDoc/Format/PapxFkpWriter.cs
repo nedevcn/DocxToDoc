@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 
-namespace Nedev.DocxToDoc.Format
+namespace Nedev.FileConverters.DocxToDoc.Format
 {
     /// <summary>
     /// Helps pack Paragraph Properties (PAPX) into a Formatted Disk Page (FKP).

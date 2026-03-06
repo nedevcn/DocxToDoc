@@ -1,6 +1,6 @@
 using System.IO;
 
-namespace Nedev.DocxToDoc.Format
+namespace Nedev.FileConverters.DocxToDoc.Format
 {
     /// <summary>
     /// Represents the File Information Block (FIB) in a Word 97-2003 binary file.
