@@ -358,23 +358,30 @@ namespace Nedev.FileConverters.DocxToDoc.Format
         private void WriteFontTable(BinaryWriter writer, List<FontModel> fonts)
         {
             // STTB (String Table) header for FFN
-            writer.Write((ushort)0xFFFF); // fExtend
-            writer.Write((ushort)fonts.Count); 
+            writer.Write((ushort)0xFFFF); // fExtend - Unicode strings
+            writer.Write((ushort)fonts.Count);
             writer.Write((ushort)0); // cbExtra (0 for FFN)
 
             foreach (var font in fonts)
             {
                 // FFN (Font Family Name) structure
-                // cbFfn (1 byte): Total size of FFN excluding this byte
+                // Build the font name as null-terminated Unicode string
                 byte[] nameBytes = System.Text.Encoding.Unicode.GetBytes(font.Name + "\0");
-                byte cbFfn = (byte)(1 + 1 + 2 + 1 + 1 + nameBytes.Length); // Simplified
-                
+
+                // Calculate total size: prq(1) + fTrueType(1) + ff(1) + wWeight(2) + chs(1) + ixchSz(1) + name
+                // Actually: prq(1) + fTrueType(1 bit) + ff(4 bits) + wWeight(2) + chs(1) + ixchSz(1) + name
+                byte cbFfn = (byte)(1 + 1 + 2 + 1 + 1 + nameBytes.Length);
+
+                // prq (bits 0-1): Pitch
+                // fTrueType (bit 2): TrueType flag
+                // ff (bits 3-6): Font family
+                byte prqAndFlags = (byte)(((byte)font.Pitch & 0x03) | (((byte)font.Family & 0x0F) << 3));
+
                 writer.Write(cbFfn);
-                writer.Write((byte)0); // prq/fTrueType
-                writer.Write((byte)0); // ff/w
-                writer.Write((short)0); // wWeight
-                writer.Write((byte)0); // chs (Charset)
-                writer.Write((byte)0); // ixchSz
+                writer.Write(prqAndFlags);
+                writer.Write(font.Weight);
+                writer.Write(font.Charset);
+                writer.Write((byte)0); // ixchSz - index to extra string (0 = none)
                 writer.Write(nameBytes);
             }
         }
@@ -386,15 +393,19 @@ namespace Nedev.FileConverters.DocxToDoc.Format
             writer.Write((ushort)0); // cbStshi (placeholder)
             long startPos = writer.BaseStream.Position;
 
-            // cstd (count of styles)
-            ushort cstd = (ushort)Math.Max(styles.Count, 15); // Word usually expects at least 15 standard slots
+            // cstd (count of styles) - Word expects at least 15 standard styles
+            ushort cstd = (ushort)Math.Max(styles.Count, 15);
             writer.Write(cstd);
-            writer.Write((ushort)0x000A); // cbStd (size of STD base)
-            
-            writer.Write((ushort)0); // fSls
-            writer.Write((ushort)0); // ftcStandard
-            // ... more STSHI fields
-            writer.Write(new byte[10]); // Padding for minimal STSHI
+            writer.Write((ushort)0x0012); // cbStd (size of STD base - 18 bytes for Word 97-2003)
+
+            // STSHI flags
+            writer.Write((ushort)0); // stshi.fStdStylenamesWord97
+            writer.Write((ushort)0); // stshi.ftcStandardChpStsh
+            writer.Write((ushort)0); // stshi.wSpare
+            writer.Write((ushort)0); // stshi.wSpare1
+            writer.Write((uint)0);   // stshi.cstdBase
+            writer.Write((ushort)0); // stshi.cstdNew
+            writer.Write((ushort)0); // stshi.cstdCopy
 
             long endPos = writer.BaseStream.Position;
             writer.BaseStream.Seek(startPos - 2, SeekOrigin.Begin);
@@ -404,9 +415,96 @@ namespace Nedev.FileConverters.DocxToDoc.Format
             // Write STDs (Style Descriptions)
             for (int i = 0; i < cstd; i++)
             {
-                // For now, write empty or placeholder STDs
-                writer.Write((ushort)0); // cb (0 = empty slot)
+                var style = styles.FirstOrDefault(s => s.StyleId == i);
+
+                if (style == null)
+                {
+                    // Empty slot
+                    writer.Write((ushort)0); // cb (0 = empty slot)
+                    continue;
+                }
+
+                // Calculate STD size
+                byte[] nameBytes = System.Text.Encoding.Unicode.GetBytes(style.Name + "\0");
+                int cbStd = 10 + nameBytes.Length; // Base (10) + name
+
+                // Add PAPX if present
+                byte[]? papxData = null;
+                if (style.ParagraphProps != null)
+                {
+                    papxData = BuildPapxFromStyle(style.ParagraphProps);
+                    cbStd += 1 + papxData.Length; // cbGrpprlPapx + data
+                }
+
+                // Add CHPX if present
+                byte[]? chpxData = null;
+                if (style.CharacterProps != null)
+                {
+                    chpxData = BuildChpxFromStyle(style.CharacterProps);
+                    cbStd += 1 + chpxData.Length; // cbGrpprlChpx + data
+                }
+
+                writer.Write((ushort)cbStd);
+
+                // STD base (10 bytes)
+                writer.Write((byte)(style.IsParagraphStyle ? 1 : 2)); // sgc (style type)
+                writer.Write((byte)style.StyleId); // istdBase (parent style)
+                writer.Write((ushort)(style.NextStyle ?? style.StyleId)); // istdNext
+                writer.Write((ushort)0); // bchUpe - offset to UPX
+                writer.Write((ushort)0); // fHasUpe, fScratch, fHidden, etc.
+                writer.Write((byte)nameBytes.Length); // stzName length
+                writer.Write(nameBytes);
+
+                // UPX (formatting)
+                if (papxData != null)
+                {
+                    writer.Write((byte)papxData.Length);
+                    writer.Write(papxData);
+                }
+                else
+                {
+                    writer.Write((byte)0); // No PAPX
+                }
+
+                if (chpxData != null)
+                {
+                    writer.Write((byte)chpxData.Length);
+                    writer.Write(chpxData);
+                }
+                else
+                {
+                    writer.Write((byte)0); // No CHPX
+                }
             }
+        }
+
+        private byte[] BuildPapxFromStyle(ParagraphModel.ParagraphProperties props)
+        {
+            var sprms = new List<byte>();
+
+            if (props.Alignment != ParagraphModel.Justification.Left)
+            {
+                sprms.Add(0x03); sprms.Add(0x24); sprms.Add((byte)props.Alignment);
+            }
+
+            return sprms.ToArray();
+        }
+
+        private byte[] BuildChpxFromStyle(RunModel.CharacterProperties props)
+        {
+            var sprms = new List<byte>();
+
+            if (props.IsBold) { sprms.Add(0x35); sprms.Add(0x08); sprms.Add(1); }
+            if (props.IsItalic) { sprms.Add(0x36); sprms.Add(0x08); sprms.Add(1); }
+            if (props.IsStrike) { sprms.Add(0x37); sprms.Add(0x08); sprms.Add(1); }
+            if (props.FontSize.HasValue)
+            {
+                sprms.Add(0x43); sprms.Add(0x4A);
+                sprms.Add(BitConverter.GetBytes((short)props.FontSize.Value)[0]);
+                sprms.Add(BitConverter.GetBytes((short)props.FontSize.Value)[1]);
+            }
+
+            return sprms.ToArray();
         }
     }
 }

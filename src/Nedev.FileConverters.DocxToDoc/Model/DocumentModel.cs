@@ -24,10 +24,22 @@ namespace Nedev.FileConverters.DocxToDoc.Model
     {
         public int PageWidth { get; set; } = 11906; // Default Letter/A4
         public int PageHeight { get; set; } = 16838;
-        public int MarginLeft { get; set; } = 1440; 
+        public int MarginLeft { get; set; } = 1440;
         public int MarginRight { get; set; } = 1440;
         public int MarginTop { get; set; } = 1440;
         public int MarginBottom { get; set; } = 1440;
+
+        // Header/Footer references
+        public string? HeaderReference { get; set; }
+        public string? FooterReference { get; set; }
+        public string? FirstPageHeaderReference { get; set; }
+        public string? FirstPageFooterReference { get; set; }
+        public string? EvenPagesHeaderReference { get; set; }
+        public string? EvenPagesFooterReference { get; set; }
+
+        // Page numbering
+        public int StartPageNumber { get; set; } = 1;
+        public bool RestartPageNumbering { get; set; } = false;
     }
 
     public class AbstractNumberingModel
@@ -55,11 +67,37 @@ namespace Nedev.FileConverters.DocxToDoc.Model
         public string Id { get; set; } = string.Empty;
         public string Name { get; set; } = string.Empty;
         public bool IsParagraphStyle { get; set; }
+        public int StyleId { get; set; } // ISTD index
+        public int? BasedOn { get; set; } // Parent style ID
+        public int? NextStyle { get; set; } // Next paragraph style
+        public ParagraphModel.ParagraphProperties? ParagraphProps { get; set; }
+        public RunModel.CharacterProperties? CharacterProps { get; set; }
     }
 
     public class FontModel
     {
         public string Name { get; set; } = string.Empty;
+        public FontFamily Family { get; set; } = FontFamily.Auto;
+        public FontPitch Pitch { get; set; } = FontPitch.Default;
+        public short Weight { get; set; } = 400; // Normal weight
+        public byte Charset { get; set; } = 0; // ANSI_CHARSET
+    }
+
+    public enum FontFamily : byte
+    {
+        Auto = 0,
+        Roman = 1,
+        Swiss = 2,
+        Modern = 3,
+        Script = 4,
+        Decorative = 5
+    }
+
+    public enum FontPitch : byte
+    {
+        Default = 0,
+        Fixed = 1,
+        Variable = 2
     }
 
     public class TableModel
@@ -100,6 +138,8 @@ namespace Nedev.FileConverters.DocxToDoc.Model
     {
         public string Text { get; set; } = string.Empty;
         public CharacterProperties Properties { get; } = new CharacterProperties();
+        public ImageModel? Image { get; set; }
+        public HyperlinkModel? Hyperlink { get; set; }
 
         public class CharacterProperties
         {
@@ -107,6 +147,40 @@ namespace Nedev.FileConverters.DocxToDoc.Model
             public bool IsItalic { get; set; }
             public bool IsStrike { get; set; }
             public int? FontSize { get; set; } // In half-points (e.g., 24 = 12pt)
+            public string? FontName { get; set; }
+            public UnderlineType Underline { get; set; } = UnderlineType.None;
+            public string? Color { get; set; } // Hex color like "FF0000"
         }
+    }
+
+    public enum UnderlineType
+    {
+        None = 0,
+        Single = 1,
+        Double = 2,
+        Thick = 3,
+        Dotted = 4,
+        Dashed = 5,
+        Wave = 6
+    }
+
+    public class HyperlinkModel
+    {
+        public string? RelationshipId { get; set; }
+        public string? Anchor { get; set; } // Internal bookmark
+        public string? Tooltip { get; set; }
+        public string DisplayText { get; set; } = string.Empty;
+        public string TargetUrl { get; set; } = string.Empty;
+    }
+
+    public class ImageModel
+    {
+        public string Id { get; set; } = string.Empty;
+        public string RelationshipId { get; set; } = string.Empty;
+        public byte[]? Data { get; set; }
+        public string ContentType { get; set; } = string.Empty;
+        public int Width { get; set; }
+        public int Height { get; set; }
+        public string? FileName { get; set; }
     }
 }

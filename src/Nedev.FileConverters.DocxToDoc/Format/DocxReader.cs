@@ -4,6 +4,7 @@ using System.IO.Compression;
 using System.Xml;
 using System.Text;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace Nedev.FileConverters.DocxToDoc.Format
 {
@@ -14,12 +15,37 @@ namespace Nedev.FileConverters.DocxToDoc.Format
     public class DocxReader : IDisposable
     {
         private readonly ZipArchive _archive;
+        private readonly Dictionary<string, string> _relationships;
         private bool _disposedValue;
 
         public DocxReader(Stream docxStream)
         {
             // We assume the caller manages the base stream's lifecycle.
             _archive = new ZipArchive(docxStream, ZipArchiveMode.Read, leaveOpen: true);
+            _relationships = LoadRelationships();
+        }
+
+        private Dictionary<string, string> LoadRelationships()
+        {
+            var rels = new Dictionary<string, string>();
+            var relsEntry = _archive.GetEntry("word/_rels/document.xml.rels");
+            if (relsEntry == null) return rels;
+
+            using var stream = relsEntry.Open();
+            using var reader = XmlReader.Create(stream);
+            while (reader.Read())
+            {
+                if (reader.NodeType == XmlNodeType.Element && reader.LocalName == "Relationship")
+                {
+                    string? id = reader.GetAttribute("Id");
+                    string? target = reader.GetAttribute("Target");
+                    if (!string.IsNullOrEmpty(id) && !string.IsNullOrEmpty(target))
+                    {
+                        rels[id] = target;
+                    }
+                }
+            }
+            return rels;
         }
 
         public Nedev.FileConverters.DocxToDoc.Model.DocumentModel ReadDocument()
@@ -129,6 +155,42 @@ namespace Nedev.FileConverters.DocxToDoc.Format
                         if (int.TryParse(xmlReader.GetAttribute("w:top"), out int t)) currentSection.MarginTop = t;
                         if (int.TryParse(xmlReader.GetAttribute("w:bottom"), out int b)) currentSection.MarginBottom = b;
                     }
+                    else if (localName == "headerReference" && currentSection != null)
+                    {
+                        string? type = xmlReader.GetAttribute("w:type");
+                        string? id = xmlReader.GetAttribute("r:id");
+                        if (id != null)
+                        {
+                            switch (type)
+                            {
+                                case "default": currentSection.HeaderReference = id; break;
+                                case "first": currentSection.FirstPageHeaderReference = id; break;
+                                case "even": currentSection.EvenPagesHeaderReference = id; break;
+                            }
+                        }
+                    }
+                    else if (localName == "footerReference" && currentSection != null)
+                    {
+                        string? type = xmlReader.GetAttribute("w:type");
+                        string? id = xmlReader.GetAttribute("r:id");
+                        if (id != null)
+                        {
+                            switch (type)
+                            {
+                                case "default": currentSection.FooterReference = id; break;
+                                case "first": currentSection.FirstPageFooterReference = id; break;
+                                case "even": currentSection.EvenPagesFooterReference = id; break;
+                            }
+                        }
+                    }
+                    else if (localName == "pgNumType" && currentSection != null)
+                    {
+                        if (int.TryParse(xmlReader.GetAttribute("w:start"), out int start))
+                        {
+                            currentSection.StartPageNumber = start;
+                            currentSection.RestartPageNumbering = true;
+                        }
+                    }
                     else if (localName == "jc" && currentParagraph != null)
                     {
                         string val = xmlReader.GetAttribute("w:val");
@@ -160,6 +222,36 @@ namespace Nedev.FileConverters.DocxToDoc.Format
                         string val = xmlReader.GetAttribute("w:val");
                         currentRun.Properties.IsStrike = (val != "0" && val != "false");
                     }
+                    else if (localName == "u" && currentRun != null)
+                    {
+                        string val = xmlReader.GetAttribute("w:val") ?? "none";
+                        currentRun.Properties.Underline = val switch
+                        {
+                            "single" => Nedev.FileConverters.DocxToDoc.Model.UnderlineType.Single,
+                            "double" => Nedev.FileConverters.DocxToDoc.Model.UnderlineType.Double,
+                            "thick" => Nedev.FileConverters.DocxToDoc.Model.UnderlineType.Thick,
+                            "dotted" => Nedev.FileConverters.DocxToDoc.Model.UnderlineType.Dotted,
+                            "dashed" => Nedev.FileConverters.DocxToDoc.Model.UnderlineType.Dashed,
+                            "wave" => Nedev.FileConverters.DocxToDoc.Model.UnderlineType.Wave,
+                            _ => Nedev.FileConverters.DocxToDoc.Model.UnderlineType.None
+                        };
+                    }
+                    else if (localName == "color" && currentRun != null)
+                    {
+                        string? val = xmlReader.GetAttribute("w:val");
+                        if (!string.IsNullOrEmpty(val) && val != "auto")
+                        {
+                            currentRun.Properties.Color = val;
+                        }
+                    }
+                    else if (localName == "rFonts" && currentRun != null)
+                    {
+                        string? ascii = xmlReader.GetAttribute("w:ascii");
+                        if (!string.IsNullOrEmpty(ascii))
+                        {
+                            currentRun.Properties.FontName = ascii;
+                        }
+                    }
                     else if (localName == "sz" && currentRun != null)
                     {
                         string val = xmlReader.GetAttribute("w:val");
@@ -168,11 +260,91 @@ namespace Nedev.FileConverters.DocxToDoc.Format
                             currentRun.Properties.FontSize = size;
                         }
                     }
+                    else if (localName == "hyperlink" && currentParagraph != null)
+                    {
+                        string? relId = xmlReader.GetAttribute("r:id");
+                        string? anchor = xmlReader.GetAttribute("w:anchor");
+                        string? tooltip = xmlReader.GetAttribute("w:tooltip");
+
+                        // Read the hyperlink content
+                        var hyperlink = new Nedev.FileConverters.DocxToDoc.Model.HyperlinkModel
+                        {
+                            RelationshipId = relId,
+                            Anchor = anchor,
+                            Tooltip = tooltip
+                        };
+
+                        // Parse runs within hyperlink
+                        while (xmlReader.Read())
+                        {
+                            if (xmlReader.NodeType == XmlNodeType.Element && xmlReader.LocalName == "r")
+                            {
+                                var run = new Nedev.FileConverters.DocxToDoc.Model.RunModel();
+                                run.Hyperlink = hyperlink;
+                                currentParagraph.Runs.Add(run);
+
+                                // Parse run properties and text
+                                while (xmlReader.Read())
+                                {
+                                    if (xmlReader.NodeType == XmlNodeType.Element)
+                                    {
+                                        if (xmlReader.LocalName == "t")
+                                        {
+                                            string text = xmlReader.ReadElementContentAsString();
+                                            run.Text = text;
+                                            hyperlink.DisplayText += text;
+                                            textBuffer.Append(text);
+                                        }
+                                        else if (xmlReader.LocalName == "b")
+                                        {
+                                            string val = xmlReader.GetAttribute("w:val");
+                                            run.Properties.IsBold = (val != "0" && val != "false");
+                                        }
+                                        else if (xmlReader.LocalName == "i")
+                                        {
+                                            string val = xmlReader.GetAttribute("w:val");
+                                            run.Properties.IsItalic = (val != "0" && val != "false");
+                                        }
+                                    }
+                                    else if (xmlReader.NodeType == XmlNodeType.EndElement && xmlReader.LocalName == "r")
+                                    {
+                                        break;
+                                    }
+                                    if (xmlReader.Depth < 4) break;
+                                }
+                            }
+                            else if (xmlReader.NodeType == XmlNodeType.EndElement && xmlReader.LocalName == "hyperlink")
+                            {
+                                break;
+                            }
+                            if (xmlReader.Depth < 3) break;
+                        }
+
+                        // Resolve URL from relationships
+                        if (!string.IsNullOrEmpty(relId) && _relationships.TryGetValue(relId, out string? target))
+                        {
+                            hyperlink.TargetUrl = target;
+                        }
+
+                        // Skip normal processing since we handled the content
+                        continue;
+                    }
                     else if (localName == "t" && currentRun != null)
                     {
                         string text = xmlReader.ReadElementContentAsString();
                         currentRun.Text = text;
                         textBuffer.Append(text);
+                    }
+                    else if (localName == "drawing" && currentRun != null)
+                    {
+                        // Parse inline or anchored image
+                        var image = ParseDrawing(xmlReader);
+                        if (image != null)
+                        {
+                            currentRun.Image = image;
+                            // Load actual image data
+                            LoadImageData(image);
+                        }
                     }
                 }
                 else if (xmlReader.NodeType == XmlNodeType.EndElement)
@@ -292,17 +464,137 @@ namespace Nedev.FileConverters.DocxToDoc.Format
         private void ParseFonts(Stream fontStream, Nedev.FileConverters.DocxToDoc.Model.DocumentModel docModel)
         {
             using var reader = XmlReader.Create(fontStream, new XmlReaderSettings { IgnoreWhitespace = true });
+            Nedev.FileConverters.DocxToDoc.Model.FontModel? currentFont = null;
+
             while (reader.Read())
             {
-                if (reader.NodeType == XmlNodeType.Element && reader.LocalName == "font")
+                if (reader.NodeType == XmlNodeType.Element)
                 {
-                    string name = reader.GetAttribute("w:name");
-                    if (!string.IsNullOrEmpty(name))
+                    if (reader.LocalName == "font")
                     {
-                        docModel.Fonts.Add(new Nedev.FileConverters.DocxToDoc.Model.FontModel { Name = name });
+                        string name = reader.GetAttribute("w:name") ?? string.Empty;
+                        if (!string.IsNullOrEmpty(name))
+                        {
+                            currentFont = new Nedev.FileConverters.DocxToDoc.Model.FontModel { Name = name };
+                            docModel.Fonts.Add(currentFont);
+                        }
+                    }
+                    else if (reader.LocalName == "family" && currentFont != null)
+                    {
+                        string family = reader.GetAttribute("w:val") ?? "auto";
+                        currentFont.Family = family switch
+                        {
+                            "roman" => Nedev.FileConverters.DocxToDoc.Model.FontFamily.Roman,
+                            "swiss" => Nedev.FileConverters.DocxToDoc.Model.FontFamily.Swiss,
+                            "modern" => Nedev.FileConverters.DocxToDoc.Model.FontFamily.Modern,
+                            "script" => Nedev.FileConverters.DocxToDoc.Model.FontFamily.Script,
+                            "decorative" => Nedev.FileConverters.DocxToDoc.Model.FontFamily.Decorative,
+                            _ => Nedev.FileConverters.DocxToDoc.Model.FontFamily.Auto
+                        };
+                    }
+                    else if (reader.LocalName == "pitch" && currentFont != null)
+                    {
+                        string pitch = reader.GetAttribute("w:val") ?? "default";
+                        currentFont.Pitch = pitch switch
+                        {
+                            "fixed" => Nedev.FileConverters.DocxToDoc.Model.FontPitch.Fixed,
+                            "variable" => Nedev.FileConverters.DocxToDoc.Model.FontPitch.Variable,
+                            _ => Nedev.FileConverters.DocxToDoc.Model.FontPitch.Default
+                        };
+                    }
+                    else if (reader.LocalName == "charset" && currentFont != null)
+                    {
+                        if (byte.TryParse(reader.GetAttribute("w:val"), out byte charset))
+                        {
+                            currentFont.Charset = charset;
+                        }
                     }
                 }
+                else if (reader.NodeType == XmlNodeType.EndElement && reader.LocalName == "font")
+                {
+                    currentFont = null;
+                }
             }
+        }
+
+        private Nedev.FileConverters.DocxToDoc.Model.ImageModel? ParseDrawing(XmlReader reader)
+        {
+            var image = new Nedev.FileConverters.DocxToDoc.Model.ImageModel();
+            string? relId = null;
+            int width = 0;
+            int height = 0;
+
+            // Read the entire drawing element subtree
+            while (reader.Read())
+            {
+                if (reader.NodeType == XmlNodeType.Element)
+                {
+                    string localName = reader.LocalName;
+                    if (localName == "blip")
+                    {
+                        relId = reader.GetAttribute("r:embed");
+                    }
+                    else if (localName == "extents")
+                    {
+                        // CX/CY are in EMUs (English Metric Units), 1 inch = 914400 EMUs
+                        if (long.TryParse(reader.GetAttribute("cx"), out long cx))
+                        {
+                            width = (int)(cx / 914400.0 * 96); // Convert to pixels at 96 DPI
+                        }
+                        if (long.TryParse(reader.GetAttribute("cy"), out long cy))
+                        {
+                            height = (int)(cy / 914400.0 * 96);
+                        }
+                    }
+                }
+                else if (reader.NodeType == XmlNodeType.EndElement && reader.LocalName == "drawing")
+                {
+                    break;
+                }
+
+                // Prevent infinite loop on malformed XML
+                if (reader.Depth < 3) break;
+            }
+
+            if (string.IsNullOrEmpty(relId)) return null;
+
+            image.RelationshipId = relId;
+            image.Width = width;
+            image.Height = height;
+
+            return image;
+        }
+
+        private void LoadImageData(Nedev.FileConverters.DocxToDoc.Model.ImageModel image)
+        {
+            if (!_relationships.TryGetValue(image.RelationshipId, out string? target))
+                return;
+
+            // Resolve target path
+            string imagePath = target.StartsWith("/") ? target.Substring(1) : $"word/{target}";
+
+            var entry = _archive.GetEntry(imagePath);
+            if (entry == null) return;
+
+            using var stream = entry.Open();
+            using var ms = new MemoryStream();
+            stream.CopyTo(ms);
+            image.Data = ms.ToArray();
+            image.FileName = Path.GetFileName(target);
+
+            // Determine content type from extension
+            string ext = Path.GetExtension(target).ToLowerInvariant();
+            image.ContentType = ext switch
+            {
+                ".png" => "image/png",
+                ".jpg" or ".jpeg" => "image/jpeg",
+                ".gif" => "image/gif",
+                ".bmp" => "image/bmp",
+                ".tiff" or ".tif" => "image/tiff",
+                ".wmf" => "image/x-wmf",
+                ".emf" => "image/x-emf",
+                _ => "application/octet-stream"
+            };
         }
 
         protected virtual void Dispose(bool disposing)

@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFrameworks>net8.0;netstandard2.1</TargetFrameworks>
@@ -17,7 +17,7 @@
   <ItemGroup>
     <PackageReference Include="OpenMcdf" Version="2.3.1" />
     <PackageReference Include="System.Text.Encoding.CodePages" Version="8.0.0" />
-    <PackageReference Include="Nedev.FileConverters.Core" Version="*" />
+    <PackageReference Include="Nedev.FileConverters.Core" Version="0.1.0" />
   </ItemGroup>
 
   <ItemGroup>
